@@ -150,3 +150,29 @@ class ChartGenerator:
         ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.8)
         fig.tight_layout()
         return self._save(fig, "sentiment_comparison.png")
+
+    def plot_quality_distribution(self, quality_by_score: Dict[int, float]) -> str:
+        """Bar chart of average quality score per star rating."""
+        fig, ax = plt.subplots(figsize=(8, 5))
+        scores = sorted(quality_by_score.keys())
+        qualities = [quality_by_score[s] for s in scores]
+        bars = ax.bar(
+            _star_labels(scores),
+            qualities,
+            color=COLOR_PALETTE,
+            edgecolor="white",
+            linewidth=1.2,
+        )
+        for bar, q in zip(bars, qualities):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.5,
+                f"{q:.1f}",
+                ha="center", va="bottom", fontsize=10, fontweight="bold",
+            )
+        ax.set_title("Review Quality Score by Star Rating", fontsize=16, fontweight="bold", pad=15)
+        ax.set_xlabel("Rating", fontsize=12)
+        ax.set_ylabel("Quality Score (0–100)", fontsize=12)
+        ax.set_ylim(0, 105)
+        fig.tight_layout()
+        return self._save(fig, "quality_by_score.png")

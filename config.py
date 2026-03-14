@@ -18,6 +18,14 @@ DEFAULT_SEARCH_LIMIT = 20
 POSITIVE_THRESHOLD = 4          # Score >= 4 is "positive"
 SENTIMENT_MISMATCH_DELTA = 0.4  # VADER vs star disagreement threshold
 
+# --- Quality Analysis ---
+QUALITY_LENGTH_IDEAL_MIN = 30   # Minimum ideal word count for a good review
+QUALITY_LENGTH_IDEAL_MAX = 300  # Maximum ideal word count before diminishing returns
+QUALITY_WEIGHT_READABILITY = 0.25
+QUALITY_WEIGHT_INFORMATIVENESS = 0.30
+QUALITY_WEIGHT_HELPFULNESS = 0.25
+QUALITY_WEIGHT_SPECIFICITY = 0.20
+
 # --- Visualization ---
 CHART_DPI = 150
 CHART_STYLE = "seaborn-v0_8-darkgrid"
