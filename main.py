@@ -9,14 +9,20 @@ Usage:
     python main.py search  --query Q  Search reviews by keyword
     python main.py product --id PID   Analyze a specific product
     python main.py visualize          Generate all charts
+    python main.py quality            Analyze review quality metrics
+    python main.py compare --products PID1 PID2   Compare two products
+    python main.py export  --output FILE          Export analysis to JSON
 """
 import argparse
+import json
 import sys
 
 from config import DEFAULT_SAMPLE_SIZE, DEFAULT_SEARCH_LIMIT
 from models.database import ReviewDatabase
 from analyzers.sentiment import SentimentAnalyzer
 from analyzers.statistics import StatisticsAnalyzer
+from analyzers.quality import ReviewQualityAnalyzer
+from analyzers.comparator import ProductComparator
 from visualizer.charts import ChartGenerator
 from utils.helpers import (
     header, success, warn, error,
@@ -251,7 +257,206 @@ def cmd_visualize(args):
     report = analyzer.analyze_batch(sample)
     charts.plot_sentiment_comparison(report.score_vs_sentiment)
 
+    # 6. Quality by score (reuse the same sample)
+    quality_analyzer = ReviewQualityAnalyzer()
+    quality_report = quality_analyzer.analyze_batch(sample)
+    charts.plot_quality_distribution(quality_report.quality_by_score)
+
     print(f"\n{success('All charts saved to output/ directory.')}\n")
+
+
+def cmd_quality(args):
+    """Analyze review quality using readability, informativeness, and helpfulness metrics."""
+    sample_size = args.sample_size
+    print(header(f"📐  Review Quality Analysis (sample = {sample_size})"))
+
+    with ReviewDatabase() as db:
+        print("  Fetching random sample …")
+        reviews = db.get_random_sample(sample_size)
+
+    print("  Computing quality metrics …")
+    analyzer = ReviewQualityAnalyzer()
+    report = analyzer.analyze_batch(reviews)
+
+    print(f"\n  Analyzed              : {report.total} reviews")
+    print(f"  Avg Quality Score     : {report.avg_quality:.1f} / 100")
+    print(f"  Avg Readability (FRE) : {report.avg_readability:.1f}")
+    print(f"  Avg Word Count        : {report.avg_word_count:.0f}")
+    print(f"  Avg Unique Word Ratio : {report.avg_unique_ratio:.2%}")
+    print()
+    print(f"  🟢 High quality  : {report.high_quality_count}  ({report.high_quality_count / report.total * 100:.1f}%)")
+    print(f"  🟡 Medium quality: {report.medium_quality_count}  ({report.medium_quality_count / report.total * 100:.1f}%)")
+    print(f"  🔴 Low quality   : {report.low_quality_count}  ({report.low_quality_count / report.total * 100:.1f}%)")
+
+    # Quality by star rating
+    print(header("Quality Score by Star Rating"))
+    print_table(
+        ["Rating", "Avg Quality"],
+        [[stars_str(s), f"{q:.1f}"] for s, q in sorted(report.quality_by_score.items())],
+    )
+
+    # High quality examples
+    if report.examples_high:
+        print(header("🏆  Highest Quality Reviews"))
+        for rq in report.examples_high[:3]:
+            print(f"  ID {rq.review_id}:  {stars_str(rq.score)}  Quality={rq.quality_score:.1f}  "
+                  f"Readability={rq.flesch_score:.0f}  Words={rq.word_count}")
+
+    # Low quality examples
+    if report.examples_low:
+        print(header("⚠  Lowest Quality Reviews"))
+        for rq in report.examples_low[:3]:
+            print(f"  ID {rq.review_id}:  {stars_str(rq.score)}  Quality={rq.quality_score:.1f}  "
+                  f"Readability={rq.flesch_score:.0f}  Words={rq.word_count}")
+
+    print(f"\n{success('Quality analysis complete.')}\n")
+
+
+def cmd_compare(args):
+    """Compare two products side-by-side."""
+    pid_a, pid_b = args.products
+    print(header(f"⚖  Product Comparison: {pid_a} vs {pid_b}"))
+
+    with ReviewDatabase() as db:
+        comparator = ProductComparator(db)
+        report = comparator.compare(pid_a, pid_b)
+
+    pa, pb = report.product_a, report.product_b
+
+    if pa.total_reviews == 0 and pb.total_reviews == 0:
+        print(error("  No reviews found for either product."))
+        return
+
+    # Side-by-side table
+    print(header("📊  Head-to-Head Comparison"))
+    print_table(
+        ["Metric", pa.product_id, pb.product_id],
+        [
+            ["Total Reviews", format_number(pa.total_reviews), format_number(pb.total_reviews)],
+            ["Avg Score", f"{pa.avg_score:.2f}" if pa.avg_score else "N/A",
+             f"{pb.avg_score:.2f}" if pb.avg_score else "N/A"],
+            ["VADER Compound", f"{pa.avg_vader_compound:+.4f}" if pa.avg_vader_compound is not None else "N/A",
+             f"{pb.avg_vader_compound:+.4f}" if pb.avg_vader_compound is not None else "N/A"],
+            ["Mismatch %", f"{pa.mismatch_pct:.1f}%" if pa.mismatch_pct is not None else "N/A",
+             f"{pb.mismatch_pct:.1f}%" if pb.mismatch_pct is not None else "N/A"],
+            ["Avg Word Count", f"{pa.avg_word_count:.0f}", f"{pb.avg_word_count:.0f}"],
+            ["Avg Helpfulness", f"{pa.avg_helpfulness:.1%}" if pa.avg_helpfulness is not None else "N/A",
+             f"{pb.avg_helpfulness:.1%}" if pb.avg_helpfulness is not None else "N/A"],
+            ["First Review", pa.earliest_review or "N/A", pb.earliest_review or "N/A"],
+            ["Last Review", pa.latest_review or "N/A", pb.latest_review or "N/A"],
+        ],
+    )
+
+    # Score distributions
+    for profile in (pa, pb):
+        if profile.score_distribution:
+            print(header(f"Score Breakdown — {profile.product_id}"))
+            total = sum(profile.score_distribution.values())
+            for s in sorted(profile.score_distribution):
+                cnt = profile.score_distribution[s]
+                pct = cnt / total * 100
+                bar = "█" * int(pct / 2)
+                print(f"  {stars_str(s)}  {str(cnt).rjust(4)}  ({pct:5.1f}%)  {bar}")
+
+    # Winners
+    print(header("🏅  Winners"))
+    print(f"  By Avg Score     : {report.winner_by_score}")
+    print(f"  By Review Volume : {report.winner_by_volume}")
+    if report.winner_by_sentiment:
+        print(f"  By Sentiment     : {report.winner_by_sentiment}")
+
+    print(f"\n{success('Product comparison complete.')}\n")
+
+
+def cmd_export(args):
+    """Export analysis results to a JSON file."""
+    output_path = args.output
+    print(header(f"💾  Exporting Analysis to {output_path}"))
+
+    with ReviewDatabase() as db:
+        stats_analyzer = StatisticsAnalyzer(db)
+
+        print("  Gathering summary statistics …")
+        summary = stats_analyzer.summary_stats()
+
+        print("  Gathering temporal trends …")
+        trends = stats_analyzer.temporal_trends()
+
+        print("  Gathering top products …")
+        top_prods = stats_analyzer.top_products(10)
+
+        print("  Gathering top reviewers …")
+        top_revs = stats_analyzer.top_reviewers(10)
+
+        print("  Gathering helpfulness data …")
+        helpfulness = stats_analyzer.helpfulness_analysis()
+
+        print("  Gathering review length data …")
+        length_data = stats_analyzer.review_length_analysis()
+
+        print("  Running sentiment analysis on sample …")
+        sample = db.get_random_sample(100)
+
+    analyzer = SentimentAnalyzer()
+    sentiment_report = analyzer.analyze_batch(sample)
+
+    quality_analyzer = ReviewQualityAnalyzer()
+    quality_report = quality_analyzer.analyze_batch(sample)
+
+    # Build export structure
+    export_data = {
+        "summary": {
+            "total_reviews": summary["total_reviews"],
+            "unique_products": summary["unique_products"],
+            "unique_users": summary["unique_users"],
+            "avg_score": summary["avg_score"],
+            "avg_text_length": summary["avg_text_length"],
+            "avg_summary_length": summary["avg_summary_length"],
+        },
+        "score_distribution": {str(k): v for k, v in summary["score_distribution"].items()},
+        "temporal_trends": trends,
+        "top_products": top_prods,
+        "top_reviewers": top_revs,
+        "helpfulness_by_score": {
+            str(k): v for k, v in helpfulness.items()
+        },
+        "review_length_by_score": {
+            str(k): v for k, v in length_data.items()
+        },
+        "sentiment_analysis": {
+            "sample_size": sentiment_report.total,
+            "avg_compound": sentiment_report.avg_compound,
+            "mismatches": sentiment_report.mismatches,
+            "mismatch_pct": round(
+                sentiment_report.mismatches / sentiment_report.total * 100, 1
+            ) if sentiment_report.total else 0,
+            "score_vs_sentiment": {
+                str(k): v for k, v in sentiment_report.score_vs_sentiment.items()
+            },
+        },
+        "quality_analysis": {
+            "sample_size": quality_report.total,
+            "avg_quality": quality_report.avg_quality,
+            "avg_readability": quality_report.avg_readability,
+            "high_quality_pct": round(
+                quality_report.high_quality_count / quality_report.total * 100, 1
+            ) if quality_report.total else 0,
+            "medium_quality_pct": round(
+                quality_report.medium_quality_count / quality_report.total * 100, 1
+            ) if quality_report.total else 0,
+            "low_quality_pct": round(
+                quality_report.low_quality_count / quality_report.total * 100, 1
+            ) if quality_report.total else 0,
+            "quality_by_score": {
+                str(k): v for k, v in quality_report.quality_by_score.items()
+            },
+        },
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(export_data, f, indent=2, ensure_ascii=False)
+
+    print(f"\n{success(f'Exported to {output_path}')}\n")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -288,6 +493,21 @@ def build_parser() -> argparse.ArgumentParser:
     # visualize
     sub.add_parser("visualize", help="Generate all charts (saved to output/)")
 
+    # quality
+    p_qual = sub.add_parser("quality", help="Analyze review quality metrics")
+    p_qual.add_argument("--sample-size", type=int, default=DEFAULT_SAMPLE_SIZE,
+                        help=f"Number of reviews to sample (default: {DEFAULT_SAMPLE_SIZE})")
+
+    # compare
+    p_cmp = sub.add_parser("compare", help="Compare two products side-by-side")
+    p_cmp.add_argument("--products", nargs=2, required=True, metavar="PID",
+                       help="Two product IDs to compare (e.g. B007JFMH8M B000LKTHJK)")
+
+    # export
+    p_exp = sub.add_parser("export", help="Export analysis results to JSON")
+    p_exp.add_argument("--output", "-o", default="analysis_export.json",
+                       help="Output file path (default: analysis_export.json)")
+
     return parser
 
 
@@ -305,6 +525,9 @@ def main():
         "search": cmd_search,
         "product": cmd_product,
         "visualize": cmd_visualize,
+        "quality": cmd_quality,
+        "compare": cmd_compare,
+        "export": cmd_export,
     }
 
     try:
