@@ -104,9 +104,9 @@ class ReviewQualityAnalyzer:
     """Score review quality using multiple linguistic and structural metrics."""
 
     _DETAIL_PATTERNS = re.compile(
-        r"\b(\d+\s*(oz|mg|lb|kg|pack|count|inch|cm|ml|cup|tbsp|tsp|cal|kcal))"
-        r"|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"
-        r"|\$\d+",
+        r"\b(\d+\s*(oz|mg|lb|kg|pack|count|inch|cm|ml|cup|tbsp|tsp|cal|kcal))"  # quantities
+        r"|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b"                                  # dates
+        r"|\$\d+",                                                               # prices
         re.IGNORECASE,
     )
 

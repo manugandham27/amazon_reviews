@@ -558,11 +558,14 @@ All tunable parameters are centralized in [`config.py`](config.py):
 
 ## 🧪 Testing
 
-The project includes a comprehensive unit test suite using Python's `unittest` framework:
+The project includes a comprehensive unit test suite using Python's `unittest` framework, compatible with both `unittest` and `pytest` test runners:
 
 ```bash
-# Run all tests
+# Run with pytest
 python -m pytest tests/ -v
+
+# Run with unittest
+python -m unittest discover tests/ -v
 
 # Run with coverage (requires pytest-cov)
 python -m pytest tests/ -v --cov=analyzers --cov=models --cov=utils

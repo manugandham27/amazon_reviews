@@ -258,7 +258,6 @@ def cmd_visualize(args):
     charts.plot_sentiment_comparison(report.score_vs_sentiment)
 
     # 6. Quality by score (reuse the same sample)
-    from analyzers.quality import ReviewQualityAnalyzer
     quality_analyzer = ReviewQualityAnalyzer()
     quality_report = quality_analyzer.analyze_batch(sample)
     charts.plot_quality_distribution(quality_report.quality_by_score)
